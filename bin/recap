@@ -1,0 +1,339 @@
+#!/usr/bin/env python3
+"""recap — spoken recap of a Claude Code session's last turns, without touching that session's context.
+
+  recap                    the session this runs in (inside Claude or a herdr pane), else the focused herdr agent
+  recap --pane w5:p1       a specific herdr pane
+  recap --session ID       a session id
+  recap --transcript F     a transcript .jsonl
+  recap --turns 3          how many recent turns to cover (default from config, 3)
+  recap --print            also print the spoken script
+  recap --no-play          write the audio, don't play it
+  recap --out FILE         where to write the audio
+  recap --text "..."       skip summarizing; just speak this text (used by other tools)
+  recap --voice NAME       override the configured voice
+  recap --samples          write one short sample per voice and print where
+  recap --stop             stop a recap that is playing
+  recap --config           print the config file path and effective settings
+
+Pipeline: transcript → last N turns (your prompt + Claude's final reply, code and URLs stripped)
+→ Haiku writes a ~30 s spoken script (headless `claude -p`; hooks, MCP, tools and thinking off)
+→ text-to-speech (Pocket TTS if installed, else macOS `say`) → afplay in the background.
+Prints one status line. Config: ~/.config/claude-recap/config.json
+"""
+from __future__ import annotations
+
+import argparse
+import glob
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+HOME = Path.home()
+CONFIG = Path(os.environ.get("XDG_CONFIG_HOME", HOME / ".config")) / "claude-recap" / "config.json"
+CACHE = Path(os.environ.get("XDG_CACHE_HOME", HOME / ".cache")) / "claude-recap"
+PROJECTS = HOME / ".claude" / "projects"
+# Launchers (Raycast, herdr plugins) run with a minimal PATH, so look in the usual install dirs too.
+EXTRA_PATH = [HOME / ".local/bin", Path("/opt/homebrew/bin"), Path("/usr/local/bin")]
+
+DEFAULTS = {
+    "engine": "auto",        # auto | pocket | say
+    "voice": "alba",         # Pocket TTS voice
+    "say_voice": "",         # macOS `say -v` voice; empty = system default
+    "turns": 3,
+    "model": "haiku",
+    "claude": "",            # path override for the claude binary
+    "pocket_tts": "",        # path override for the pocket-tts binary
+}
+POCKET_VOICES = ["alba", "anna", "eve", "jane", "mary", "vera", "george", "michael", "paul", "jean"]
+
+SYSTEM = """You turn a developer's Claude Code session into a spoken recap they will HEAR, not read.
+They switched away and remember nothing. Write 60-100 words of plain spoken English, no markdown, no lists.
+Order: what they were working on and in which repo; where it stands now; what Claude needs from them (or "nothing is waiting on you").
+Rules: never read out ticket keys, PR numbers, SHAs, paths or URLs; say what the thing is instead ("the IPv6 port fix", "the digest doc").
+Numbers only when they matter, said naturally. Contractions are fine. No greeting beyond "Welcome back." at the start."""
+
+
+def die(msg: str) -> None:
+    sys.exit(f"recap: {msg}")
+
+
+def load_config() -> dict:
+    try:
+        user = json.loads(CONFIG.read_text())
+    except (OSError, ValueError):
+        user = {}
+    return {**DEFAULTS, **user}
+
+
+def which(name: str, override: str = "") -> str | None:
+    if override:
+        return override if Path(override).exists() else None
+    found = shutil.which(name)
+    if found:
+        return found
+    for d in EXTRA_PATH:
+        if (d / name).exists():
+            return str(d / name)
+    return None
+
+
+# ---------------------------------------------------------------- finding the session
+
+def transcript_for_session(sid: str) -> Path:
+    hits = glob.glob(str(PROJECTS / "*" / f"{sid}.jsonl"))
+    if not hits:
+        die(f"no transcript for session {sid}")
+    return Path(hits[0])
+
+
+def herdr(*args: str) -> dict:
+    exe = which("herdr")
+    if not exe:
+        return {}
+    try:
+        out = subprocess.run([exe, *args], capture_output=True, text=True, timeout=5).stdout
+        return json.loads(out) if out.strip() else {}
+    except (subprocess.SubprocessError, ValueError):
+        return {}
+
+
+def transcript_for_pane(pane: str | None) -> tuple[Path, str] | None:
+    """herdr pane → (transcript, label). pane=None: this pane if inside herdr, else the focused agent."""
+    agents = [a for a in herdr("agent", "list").get("result", {}).get("agents", [])
+              if a.get("agent") == "claude"]
+    if not agents:
+        return None
+    target = pane or os.environ.get("HERDR_PANE_ID")
+    pick = next((a for a in agents if a["pane_id"] == target), None) if target else None
+    if pick is None and not pane:
+        pick = next((a for a in agents if a.get("focused")), None)
+    if pick is None:
+        if pane:
+            die(f"no Claude agent in herdr pane {pane}")
+        return None
+    sid = (pick.get("agent_session") or {}).get("value")
+    if not sid:
+        die(f"herdr pane {pick['pane_id']} has no Claude session id yet")
+    label = " · ".join(x for x in ((pick.get("tokens") or {}).get("ref", ""),
+                                   pick.get("terminal_title_stripped") or "") if x)
+    return transcript_for_session(sid), label
+
+
+def newest_for_cwd() -> Path | None:
+    folder = PROJECTS / re.sub(r"[^A-Za-z0-9]", "-", str(Path.cwd()))
+    files = sorted(folder.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
+    return files[0] if files else None
+
+
+def locate(a: argparse.Namespace) -> tuple[Path, str]:
+    if a.transcript:
+        return Path(a.transcript), ""
+    if a.session:
+        return transcript_for_session(a.session), ""
+    if a.pane:
+        return transcript_for_pane(a.pane)  # type: ignore[return-value]
+    if os.environ.get("CLAUDE_CODE_SESSION_ID"):          # running inside a Claude Code session (/recap)
+        return transcript_for_session(os.environ["CLAUDE_CODE_SESSION_ID"]), ""
+    found = transcript_for_pane(None)                       # herdr: this pane, else the focused agent
+    if found:
+        return found
+    newest = newest_for_cwd()
+    if newest:
+        return newest, ""
+    die("no session found: pass --pane, --session or --transcript")
+    raise AssertionError
+
+
+# ---------------------------------------------------------------- reading the transcript
+# The .jsonl layout is Claude Code's internal format; skip anything unrecognised rather than fail.
+
+def user_text(entry: dict) -> str | None:
+    """A real prompt the user typed, or None for tool results, hook feedback and command noise."""
+    if entry.get("isMeta") or entry.get("isSidechain"):
+        return None
+    c = (entry.get("message") or {}).get("content")
+    if isinstance(c, list):
+        if any(isinstance(b, dict) and b.get("type") == "tool_result" for b in c):
+            return None
+        c = " ".join(b.get("text", "") for b in c if isinstance(b, dict) and b.get("type") == "text")
+    if not isinstance(c, str) or not c.strip() or c.startswith("<local-command"):
+        return None
+    m = re.search(r"<command-name>(/[\w:-]+)</command-name>", c)
+    if m:
+        return None if m.group(1).split(":")[-1] in ("/recap", "recap", "/clear") else f"(ran {m.group(1)})"
+    return c.strip()
+
+
+def turns(path: Path, n: int) -> list[tuple[str, str]]:
+    """Last n (prompt, final reply) pairs. Final reply = assistant text after the turn's last tool call."""
+    out: list[list] = []
+    with path.open(encoding="utf-8") as fh:
+        for line in fh:
+            try:
+                e = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(e, dict):
+                continue
+            if e.get("type") == "user":
+                prompt = user_text(e)
+                if prompt is not None:
+                    out.append([prompt, []])
+            elif e.get("type") == "assistant" and out and not e.get("isSidechain"):
+                for b in (e.get("message") or {}).get("content") or []:
+                    if not isinstance(b, dict):
+                        continue
+                    if b.get("type") == "tool_use":
+                        out[-1][1] = []
+                    elif b.get("type") == "text" and b.get("text", "").strip():
+                        out[-1][1].append(b["text"])
+    return [(p, "\n".join(r)) for p, r in out if r][-n:]
+
+
+def clean(text: str, limit: int) -> str:
+    text = re.sub(r"```.*?```", " [code] ", text, flags=re.S)
+    text = re.sub(r"https?://\S+", "", text)
+    text = re.sub(r"`([^`\n]*)`", r"\1", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()[:limit]
+
+
+# ---------------------------------------------------------------- summarize, speak, play
+
+def summarize(cfg: dict, label: str, pairs: list[tuple[str, str]]) -> str:
+    claude = which("claude", cfg["claude"])
+    if not claude:
+        die("claude CLI not found (set \"claude\" in the config)")
+    body = [f"Session: {label}" if label else "Session: (untitled)"]
+    for i, (prompt, reply) in enumerate(pairs, 1):
+        body.append(f"\n--- Turn {i} ---\nUser: {clean(prompt, 600)}\nClaude: {clean(reply, 3500)}")
+    # The child must not inherit this session's identity or herdr pane, or its hooks would relabel the pane.
+    # Auth variables (e.g. CLAUDE_CODE_OAUTH_TOKEN) must survive, so drop only the identity ones.
+    identity = {"CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_ENTRYPOINT",
+                "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN", "CLAUDE_PID"}
+    env = {k: v for k, v in os.environ.items() if not k.startswith("HERDR_") and k not in identity}
+    # Without these, a user-level high effort setting makes Haiku think for ~6k tokens (~60 s).
+    env["MAX_THINKING_TOKENS"] = "0"
+    r = subprocess.run(
+        [claude, "-p", "--model", cfg["model"], "--effort", "low", "--no-session-persistence",
+         "--strict-mcp-config", "--tools", "",
+         "--settings", '{"disableAllHooks":true,"outputStyle":"default","alwaysThinkingEnabled":false}',
+         "--system-prompt", SYSTEM, "\n".join(body)],
+        capture_output=True, text=True, env=env, cwd=str(CACHE), timeout=120, stdin=subprocess.DEVNULL)
+    if r.returncode != 0 or not r.stdout.strip():
+        die(f"summarizer failed (exit {r.returncode}): {(r.stdout + r.stderr).strip()[-400:]}")
+    return r.stdout.strip()
+
+
+def engine(cfg: dict) -> tuple[str, str]:
+    """→ (engine name, executable)."""
+    want = cfg["engine"]
+    pocket = which("pocket-tts", cfg["pocket_tts"])
+    if want in ("auto", "pocket") and pocket:
+        return "pocket", pocket
+    if want == "pocket":
+        die("pocket-tts not found: `uv tool install pocket-tts`, or set engine to \"say\"")
+    say = which("say")
+    if not say:
+        die("no text-to-speech engine: install pocket-tts or run on macOS")
+    return "say", say
+
+
+def speak(cfg: dict, text: str, out: Path, voice: str) -> str:
+    name, exe = engine(cfg)
+    if name == "pocket":
+        cmd = [exe, "generate", "--voice", voice, "--text", text, "--output-path", str(out)]
+    else:
+        cmd = [exe, "-o", str(out), "--file-format=WAVE", "--data-format=LEI16@24000"]
+        if cfg["say_voice"]:
+            cmd += ["-v", cfg["say_voice"]]
+        cmd.append(text)
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    if r.returncode != 0 or not out.exists():
+        die(f"{name} failed: {(r.stderr or r.stdout).strip()[-300:]}")
+    return voice if name == "pocket" else f"say:{cfg['say_voice'] or 'default'}"
+
+
+def stop() -> None:
+    subprocess.run(["pkill", "-f", f"afplay {CACHE}"], capture_output=True)
+
+
+def play(audio: Path) -> None:
+    stop()
+    subprocess.Popen(["afplay", str(audio)], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, start_new_session=True)
+
+
+def seconds(audio: Path) -> float:
+    import wave
+    try:
+        with wave.open(str(audio)) as w:
+            return w.getnframes() / w.getframerate()
+    except (wave.Error, EOFError, OSError):
+        return 0.0
+
+
+# ---------------------------------------------------------------- commands
+
+def samples(cfg: dict) -> None:
+    d = CACHE / "samples"
+    d.mkdir(parents=True, exist_ok=True)
+    line = "Welcome back. You were fixing the port check. The pull request is approved, and nothing else is waiting on you."
+    name, _ = engine(cfg)
+    voices = POCKET_VOICES if name == "pocket" else [cfg["say_voice"] or "default"]
+    for v in voices:
+        speak(cfg, line, d / f"{v}.wav", v)
+    print(f"{len(voices)} samples in {d}\nplay one: afplay {d}/{voices[0]}.wav\n"
+          f"pick one: set \"voice\" in {CONFIG}")
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(add_help=False)
+    for flag in ("--pane", "--session", "--transcript", "--voice", "--text", "--out"):
+        ap.add_argument(flag)
+    ap.add_argument("--turns", type=int)
+    for flag in ("--print", "--no-play", "--stop", "--samples", "--config"):
+        ap.add_argument(flag, action="store_true")
+    ap.add_argument("-h", "--help", action="store_true")
+    a = ap.parse_args()
+    if a.help:
+        print(__doc__)
+        return
+    if a.stop:
+        stop()
+        return
+    cfg = load_config()
+    CACHE.mkdir(parents=True, exist_ok=True)
+    if a.config:
+        print(f"{CONFIG}{'' if CONFIG.exists() else ' (not created; defaults in use)'}")
+        print(json.dumps({**cfg, "engine_resolved": engine(cfg)[0]}, indent=2))
+        return
+    if a.samples:
+        samples(cfg)
+        return
+
+    voice = a.voice or cfg["voice"]
+    if a.text:
+        script, name = a.text, "text"
+    else:
+        path, label = locate(a)
+        pairs = turns(path, a.turns or int(cfg["turns"]))
+        if not pairs:
+            die("nothing to recap yet")
+        script, name = summarize(cfg, label, pairs), path.stem
+    audio = Path(a.out) if a.out else CACHE / f"recap-{name}.wav"
+    used = speak(cfg, script, audio, voice)
+    if a.print:
+        print(script, end="\n\n")
+    if not a.no_play:
+        play(audio)
+    print(f"{'▶ playing' if not a.no_play else 'saved'} {seconds(audio):.0f}s recap · voice {used}"
+          f" · stop: recap --stop")
+
+
+if __name__ == "__main__":
+    main()

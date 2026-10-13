@@ -1,0 +1,8 @@
+{
+  "name": "recap",
+  "version": "0.1.0",
+  "description": "Spoken audio recap of a Claude Code session's last few turns, made outside the session so its context stays small.",
+  "author": { "name": "Andres Araujo" },
+  "license": "MIT",
+  "keywords": ["recap", "tts", "audio", "herdr", "context"]
+}

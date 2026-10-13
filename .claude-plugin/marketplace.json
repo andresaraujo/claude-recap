@@ -1,0 +1,11 @@
+{
+  "name": "claude-recap",
+  "owner": { "name": "Andres Araujo" },
+  "plugins": [
+    {
+      "name": "recap",
+      "source": "./",
+      "description": "Spoken audio recap of a Claude Code session's last few turns (/recap)."
+    }
+  ]
+}

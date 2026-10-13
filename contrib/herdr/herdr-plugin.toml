@@ -1,0 +1,18 @@
+id = "local.recap"
+name = "Recap"
+version = "0.1.0"
+min_herdr_version = "0.8.0"
+description = "Spoken recap of the focused Claude pane's last turns (claude-recap)"
+platforms = ["macos"]
+
+[[actions]]
+id = "play"
+title = "Recap: play spoken recap of this Claude pane"
+contexts = ["workspace"]
+command = ["sh", "run.sh", "play"]
+
+[[actions]]
+id = "stop"
+title = "Recap: stop playback"
+contexts = ["workspace"]
+command = ["sh", "run.sh", "stop"]
