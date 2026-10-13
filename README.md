@@ -14,7 +14,7 @@ macOS only for now.
 
 1. **The `/recap` command** (Claude Code plugin):
    ```
-   claude plugin marketplace add <owner>/claude-recap     # or a local path to this repo
+   claude plugin marketplace add andresaraujo/claude-recap   # or a local path to this repo
    claude plugin install recap@claude-recap
    ```
 2. **A good voice (optional, recommended):** `uv tool install pocket-tts`.
