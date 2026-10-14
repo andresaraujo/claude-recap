@@ -1,94 +1,128 @@
 <!doctype html>
-<!-- Demo scene for make.mjs: a terminal workspace with 3 Claude Code panes. Rendered frame by frame via window.seek(t). -->
+<!-- Demo scene for make.mjs: a herdr workspace (look based on herdr.dev's UI mock, Catppuccin Mocha) with Claude Code
+     panes. Rendered frame by frame via window.seek(t). -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@500&display=block" rel="stylesheet">
 <style>
 	:root {
-		--bg: #0e0f11;
-		--pane: #15161a;
-		--line: #2a2c31;
-		--text: #e9e9e6;
-		--muted: #8b8e96;
-		--accent: #4cc38a;
-		--amber: #e0b154;
-		--mono: ui-monospace, 'SF Mono', Menlo, monospace;
-		--sans: -apple-system, 'SF Pro Text', system-ui, sans-serif;
+		--crust: #11111b;
+		--mantle: #181825;
+		--base: #1e1e2e;
+		--surface0: #313244;
+		--surface1: #45475a;
+		--overlay0: #6c7086;
+		--overlay2: #9399b2;
+		--subtext: #a6adc8;
+		--text: #cdd6f4;
+		--mauve: #cba6f7;
+		--yellow: #f9e2af;
+		--green: #a6e3a1;
+		--teal: #94e2d5;
+		--peach: #fab387;
+		--mono: 'JetBrains Mono', ui-monospace, Menlo, monospace;
 	}
 	* { box-sizing: border-box; }
-	html, body { margin: 0; width: 1280px; height: 720px; overflow: hidden; background: var(--bg); color: var(--text); font: 15px/1.5 var(--mono); }
+	html, body { margin: 0; width: 1280px; height: 720px; overflow: hidden; background: var(--crust); color: var(--overlay0); font: 14px/1.5 var(--mono); }
+	p { margin: 0; }
+	strong { color: var(--text); font-weight: 600; }
+	small { font-size: 11.5px; display: block; }
 
-	.tabs { height: 34px; display: flex; gap: 2px; padding: 6px 10px 0; color: var(--muted); font-size: 13px; }
-	.tabs span { padding: 4px 12px; border-radius: 6px 6px 0 0; }
-	.tabs .on { background: var(--pane); color: var(--text); }
+	.app { display: grid; grid-template-columns: 236px 1fr; height: 100%; }
 
-	.grid { position: absolute; top: 34px; bottom: 30px; left: 0; right: 0; display: grid; grid-template-columns: 1.55fr 1fr; grid-template-rows: 1fr 1fr; gap: 6px; padding: 0 6px; }
-	.pane { background: var(--pane); border: 1px solid var(--line); border-radius: 8px; padding: 12px 16px; overflow: hidden; position: relative; }
-	.pane.focus { grid-row: span 2; border-color: #3d4a43; }
-	.title { color: var(--muted); font-size: 12.5px; margin-bottom: 10px; display: flex; gap: 8px; align-items: center; }
-	.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-	.you { color: var(--accent); }
-	.msg { margin: 0 0 12px; color: #c9cac6; }
-	.msg.u { color: var(--text); }
-	.msg.u::before { content: '> '; color: var(--accent); }
-	.prompt { color: var(--accent); }
-	.cursor { display: inline-block; width: 9px; height: 17px; background: var(--text); vertical-align: -3px; animation: blink 1s steps(1) infinite; }
+	/* Sidebar: spaces on top, agents below */
+	aside { background: var(--mantle); border-right: 1px solid var(--surface0); display: grid; grid-template-rows: 1fr 1fr; }
+	.half { padding: 10px 0; }
+	.half + .half { border-top: 1px solid var(--surface0); }
+	.htitle { display: flex; justify-content: space-between; padding: 0 14px 8px; }
+	.row { display: flex; gap: 10px; padding: 6px 14px; color: var(--overlay2); }
+	.row.on { background: var(--base); }
+	.mark { width: 8px; height: 8px; border-radius: 50%; margin-top: 7px; flex: none; }
+	.sym { width: 10px; flex: none; }
+
+	/* Main: tabs + panes */
+	main { display: grid; grid-template-rows: 30px 1fr; min-width: 0; }
+	.tabs { display: flex; align-items: stretch; border-bottom: 1px solid var(--surface0); background: var(--mantle); }
+	.tabs span { padding: 5px 16px; }
+	.tabs .on { background: var(--mauve); color: var(--crust); font-weight: 600; }
+	.panes { display: grid; grid-template-columns: 1.6fr 1fr; padding: 14px 8px 8px; min-height: 0; }
+	.pane { position: relative; padding: 20px 18px 12px; min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+	.pane.focus { border: 1.5px solid var(--mauve); border-radius: 2px; }
+	.pane.focus > .label { position: absolute; top: -11px; left: 10px; padding: 0 5px; background: var(--crust); color: var(--mauve); font-weight: 700; }
+	.pane.dim { color: var(--surface1); padding-left: 22px; gap: 4px; }
+
+	/* Claude Code look */
+	.u { color: var(--overlay2); }
+	.u::before { content: '❯ '; color: var(--mauve); }
+	.a { color: var(--subtext); padding-left: 16px; position: relative; }
+	.a::before { content: '●'; position: absolute; left: 0; color: var(--peach); }
+	.grow { flex: 1; }
+	.input { border-top: 1px solid var(--surface0); padding-top: 8px; color: var(--mauve); }
+	.cursor { display: inline-block; width: 8px; height: 16px; background: var(--text); vertical-align: -3px; animation: blink 1s steps(1) infinite; }
 	@keyframes blink { 50% { opacity: 0; } }
-	.spin::before { content: '⠋'; color: var(--amber); animation: spin 0.8s steps(1) infinite; }
+	.foot { font-size: 12.5px; margin-top: -8px; }
+	.foot .p { color: var(--teal); } .foot .b { color: var(--yellow); } .foot .g { color: var(--green); }
+	.spin::before { content: '⠋'; animation: spin 0.8s steps(1) infinite; }
 	@keyframes spin { 0% { content: '⠋'; } 25% { content: '⠙'; } 50% { content: '⠸'; } 75% { content: '⠴'; } }
 
-	.status { position: absolute; left: 0; right: 0; bottom: 0; height: 30px; display: flex; align-items: center; gap: 14px; padding: 0 14px; font-size: 13px; color: var(--muted); border-top: 1px solid var(--line); }
-	.status .play { color: var(--accent); display: none; align-items: center; gap: 10px; }
+	/* recap's herdr toast */
+	.toast { position: absolute; top: 46px; right: 22px; background: var(--base); border: 1px solid var(--surface1); border-radius: 6px; padding: 9px 14px; color: var(--text); display: none; align-items: center; gap: 10px; box-shadow: 0 10px 30px rgb(0 0 0 / 0.45); }
+	.toast .t { color: var(--mauve); font-weight: 600; }
 	.bars { display: inline-flex; gap: 2px; align-items: center; height: 14px; }
-	.bars i { width: 3px; background: var(--accent); border-radius: 1px; animation: bar 0.9s ease-in-out infinite; }
+	.bars i { width: 3px; background: var(--green); border-radius: 1px; animation: bar 0.9s ease-in-out infinite; }
 	@keyframes bar { 0%, 100% { height: 3px; } 50% { height: 14px; } }
 
-	.toast { position: absolute; top: 48px; right: 18px; background: #23252b; border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; font-size: 13px; display: none; align-items: center; gap: 10px; box-shadow: 0 8px 24px rgb(0 0 0 / 0.4); }
-
-	/* Overlays (captions, key chip, subtitles, end card) use the sans face. */
-	.overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgb(8 9 10 / 0.82); font-family: var(--sans); opacity: 0; pointer-events: none; }
-	.overlay h1 { font-size: 46px; font-weight: 650; letter-spacing: -0.02em; line-height: 1.15; text-align: center; margin: 0; max-width: 900px; }
-	.overlay p { font: 20px var(--mono); color: var(--muted); margin: 18px 0 0; text-align: center; }
-	.overlay .accent { color: var(--accent); }
-
-	.key { position: absolute; left: 50%; top: 42%; transform: translate(-50%, -50%) scale(0.9); font: 600 30px var(--mono); padding: 14px 26px; border-radius: 12px; background: #23252b; border: 1px solid #3a3d44; box-shadow: 0 3px 0 #3a3d44, 0 16px 40px rgb(0 0 0 / 0.5); opacity: 0; transform: translate(-50%, -50%); }
-	
-	.sub { position: absolute; left: 50%; bottom: 58px; transform: translateX(-50%); max-width: 980px; font: 500 25px/1.35 var(--sans); text-align: center; background: rgb(0 0 0 / 0.78); padding: 10px 18px; border-radius: 10px; opacity: 0; }
+	.key { position: absolute; left: 50%; top: 44%; transform: translate(-50%, -50%); font: 600 28px var(--mono); color: var(--text); padding: 12px 24px; border-radius: 10px; background: var(--base); border: 1px solid var(--surface1); box-shadow: 0 3px 0 var(--surface1), 0 16px 40px rgb(0 0 0 / 0.5); opacity: 0; }
+	.sub { position: absolute; left: calc(50% + 118px); bottom: 70px; transform: translateX(-50%); width: max-content; max-width: 900px; font: 500 24px/1.35 Inter, system-ui, sans-serif; color: #fff; text-align: center; background: rgb(17 17 27 / 0.9); padding: 10px 18px; border-radius: 10px; opacity: 0; }
 </style>
 </head>
 <body>
-	<div class="tabs"><span class="on">agents</span><span>site</span><span>notes</span></div>
-	<div class="grid">
-		<div class="pane focus">
-			<div class="title"><span class="dot" style="background: var(--accent)"></span>claude · scratch-agent <span style="margin-left:auto">idle 47m</span></div>
-			<p class="msg u">add a timeout to the bash tool</p>
-			<p class="msg">Added a 60-second timeout. On timeout it kills the whole process group and returns the partial output. All tests pass.</p>
-			<p class="msg u">when the sandbox blocks something, the model just retries. can it get a hint?</p>
-			<p class="msg">The bash tool now spots sandbox denials and adds a hint … One gap: the hint fires on any "operation not permitted".</p>
-			<p class="msg u">ok, leave that edge case for tomorrow. write the README section</p>
-			<p class="msg">Added a Sandbox section to the README …</p>
-			<p><span class="prompt">&gt;</span> <span class="cursor"></span></p>
+<div class="app">
+	<aside>
+		<div class="half">
+			<div class="htitle">spaces</div>
+			<div class="row on"><span class="mark" style="background: var(--green)"></span><div><strong>scratch-agent</strong><small style="color: var(--mauve)">main</small></div></div>
+			<div class="row"><span class="mark" style="background: var(--yellow)"></span><div><strong>site</strong><small>feat/og-images</small></div></div>
+			<div class="row"><span class="mark" style="background: var(--teal)"></span><div><strong>cv</strong><small>main</small></div></div>
 		</div>
-		<div class="pane">
-			<div class="title"><span class="dot" style="background: var(--amber)"></span>claude · site</div>
-			<p class="msg"><span class="spin"></span> Running astro build…</p>
+		<div class="half">
+			<div class="htitle"><span>agents</span><span>grouped</span></div>
+			<div class="row on"><span class="sym" style="color: var(--green)">○</span><div><strong>scratch-agent</strong><small>idle · claude</small></div></div>
+			<div class="row"><span class="sym" style="color: var(--yellow)">●</span><div><strong>site</strong><small style="color: var(--yellow)">working · claude</small></div></div>
+			<div class="row"><span class="sym" style="color: var(--teal)">●</span><div><strong>cv</strong><small style="color: var(--teal)">done · claude</small></div></div>
 		</div>
-		<div class="pane">
-			<div class="title"><span class="dot" style="background: var(--accent)"></span>claude · cv</div>
-			<p class="msg">Built out/cv.pdf (1 page).</p>
+	</aside>
+	<main>
+		<div class="tabs"><span class="on">claude</span><span>tests</span><span>+</span></div>
+		<div class="panes">
+			<div class="pane focus">
+				<span class="label">claude</span>
+				<p class="u">add a timeout to the bash tool</p>
+				<p class="a">Added a 60-second timeout. On timeout it kills the whole process group and returns the partial output. All tests pass.</p>
+				<p class="u">when the sandbox blocks something, the model just retries. can it get a hint?</p>
+				<p class="a">The bash tool now spots sandbox denials and adds a hint. One gap: the hint fires on any "operation not permitted".</p>
+				<p class="u">ok, leave that edge case for tomorrow. write the README section</p>
+				<p class="a">Added a Sandbox section to the README.</p>
+				<div class="grow"></div>
+				<div class="input">❯ <span class="cursor"></span></div>
+				<div class="foot"><span class="p">~/code/scratch-agent</span> &gt; <span class="b">main</span> &gt; ctx ──────── <span class="g">41%</span></div>
+			</div>
+			<div class="pane dim">
+				<p>~/code/scratch-agent main</p>
+				<p>$ npm test</p>
+				<p>✔ bash tool: timeout kills process group</p>
+				<p>✔ bash tool: sandbox hint on denial</p>
+				<p>✔ edit_file: rejects paths outside root</p>
+				<p>tests 14 · pass 14 · fail 0</p>
+			</div>
 		</div>
-	</div>
-	<div class="status">
-		<span>agents · 3 panes</span>
-		<span class="play" id="play"><span class="bars"><i></i><i style="animation-delay:-.3s"></i><i style="animation-delay:-.6s"></i><i style="animation-delay:-.15s"></i><i style="animation-delay:-.45s"></i></span>▶ playing 28s recap · voice alba · stop: recap --stop</span>
-	</div>
-	<div class="toast" id="toast"><span class="spin"></span> recap: preparing…</div>
-	<div class="key" id="key">prefix + a</div>
-	<div class="sub" id="sub"></div>
-	<div class="overlay" id="end"><div>
-		<h1>claude-recap</h1>
-		<p class="accent">github.com/andresaraujo/claude-recap</p>
-	</div></div>
+	</main>
+</div>
+<div class="toast" id="toast"><span class="t">recap</span><span id="toastText"></span></div>
+<div class="key" id="key">prefix + a</div>
+<div class="sub" id="sub"></div>
 
 <script>
 	// Timeline in seconds. AUDIO_AT must match make.mjs.
@@ -104,17 +138,23 @@
 	let t = AUDIO_AT;
 	const subs = sentences.map((s) => { const from = t; t += (s.length / total) * AUDIO_LEN; return { from, to: t, s }; });
 
+	const preparing = '<span class="spin" style="color: var(--yellow)"></span> preparing…';
+	const playing = `<span class="bars"><i></i><i style="animation-delay:-.3s"></i><i style="animation-delay:-.6s"></i><i style="animation-delay:-.15s"></i><i style="animation-delay:-.45s"></i></span> playing ${Math.round(AUDIO_LEN)}s recap · voice alba`;
+
 	// Deterministic: make.mjs calls seek(t) once per frame, then screenshots. CSS animations are paused and set to t.
 	const fade = (s, from, to, d = 0.3) => Math.max(0, Math.min(1, (s - from) / d, (to - s) / d));
-	const show = (id, on, display) => ($(id).style.display = on ? display : 'none');
+	let toastState = null;
 	window.seek = (s) => {
 		$('key').style.opacity = fade(s, 0.8, 1.6, 0.15);
-		show('toast', s >= 1.4 && s < AUDIO_AT, 'flex');
-		show('play', s >= AUDIO_AT && s < AUDIO_AT + AUDIO_LEN, 'inline-flex');
+		const state = s < 1.4 || s >= AUDIO_AT + AUDIO_LEN ? '' : s < AUDIO_AT ? 'preparing' : 'playing';
+		if (state !== toastState) {
+			toastState = state;
+			$('toast').style.display = state ? 'flex' : 'none';
+			$('toastText').innerHTML = state === 'preparing' ? preparing : state === 'playing' ? playing : '';
+		}
 		const cur = subs.find((x) => s >= x.from && s < x.to);
 		$('sub').textContent = cur?.s ?? '';
 		$('sub').style.opacity = cur ? 1 : 0;
-		$('end').style.opacity = fade(s, AUDIO_AT + AUDIO_LEN + 0.6, Infinity, 0.4);
 		for (const a of document.getAnimations()) { a.pause(); a.currentTime = s * 1000; }
 	};
 	window.seek(0);
