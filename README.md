@@ -4,9 +4,9 @@ Hear a ~30-second spoken recap of a Claude Code session when you come back to it
 
 `recap` reads the session's saved transcript, takes your last few prompts and Claude's final replies, has Haiku write a short spoken script, and reads it aloud. All of this runs **outside** the session, so its context does not grow.
 
-[![A recap playing in herdr: press prefix+a on an idle Claude Code pane and hear what happened](docs/demo.png)](https://github.com/andresaraujo/claude-recap/raw/main/docs/demo.mp4)
+[![A recap playing in herdr: press prefix+a on an idle Claude Code pane and hear what happened](docs/demo.png)](https://andresaraujo.co/media/claude-recap-demo.mp4)
 
-▶ [Watch the 30-second demo](https://github.com/andresaraujo/claude-recap/raw/main/docs/demo.mp4) (with sound).
+▶ [Watch the 30-second demo](https://andresaraujo.co/media/claude-recap-demo.mp4) (with sound).
 
 macOS only for now.
 

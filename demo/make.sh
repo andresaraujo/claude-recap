@@ -9,3 +9,4 @@ if [ ! -f recap.wav ] || [ "${FRESH:-}" = 1 ]; then   # FRESH=1 asks Haiku for a
 fi
 node make.mjs
 cp out/demo.mp4 ../docs/demo.mp4 && cp out/poster.png ../docs/demo.png   # what the README shows
+cp out/demo.mp4 ../../andresaraujo-site/public/media/claude-recap-demo.mp4 2>/dev/null || true   # the README links the copy hosted on andresaraujo.co
