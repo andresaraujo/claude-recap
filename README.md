@@ -4,9 +4,9 @@ Hear a ~30-second spoken recap of a Claude Code session when you come back to it
 
 `recap` reads the session's saved transcript, takes your last few prompts and Claude's final replies, has Haiku write a short spoken script, and reads it aloud. All of this runs **outside** the session, so its context does not grow.
 
-```
-▶ playing 28s recap · voice alba · stop: recap --stop
-```
+[![A recap playing in herdr: press prefix+a on an idle Claude Code pane and hear what happened](docs/demo.png)](https://github.com/andresaraujo/claude-recap/raw/main/docs/demo.mp4)
+
+▶ [Watch the 30-second demo](https://github.com/andresaraujo/claude-recap/raw/main/docs/demo.mp4) (with sound).
 
 macOS only for now.
 
@@ -89,6 +89,8 @@ The summarizer is `claude -p` with hooks, MCP servers, tools and thinking turned
 python3 -m unittest discover tests
 ```
 The transcript `.jsonl` is Claude Code's internal format and may change. The parser skips anything it doesn't recognise; update `tests/fixture.jsonl` when the format moves.
+
+The README demo is generated, not screen-recorded: `demo/make.sh` runs a made-up session through the real pipeline for the audio, renders `demo/scene.html` frame by frame, and writes `docs/demo.mp4` (needs ffmpeg and Google Chrome; `FRESH=1` asks Haiku for a new script).
 
 The plugin is installed as a copy. After editing, bump `version` in `.claude-plugin/plugin.json`, then run:
 ```

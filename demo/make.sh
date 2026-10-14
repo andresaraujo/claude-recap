@@ -8,3 +8,4 @@ if [ ! -f recap.wav ] || [ "${FRESH:-}" = 1 ]; then   # FRESH=1 asks Haiku for a
 	../bin/recap --transcript session.jsonl --print --no-play --out recap.wav | sed '/^$/q' | sed '/^$/d' > recap.txt
 fi
 node make.mjs
+cp out/demo.mp4 ../docs/demo.mp4 && cp out/poster.png ../docs/demo.png   # what the README shows
