@@ -6,11 +6,11 @@ import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { chromium } from 'playwright';
 
-const AUDIO_AT = 6; // seconds into the video where the recap starts
+const AUDIO_AT = 3; // seconds into the video where the recap starts
 const FPS = 30;
 const sh = (cmd, args) => execFileSync(cmd, args, { stdio: ['ignore', 'pipe', 'inherit'] }).toString().trim();
 const audioLen = Number(sh('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', 'recap.wav']));
-const total = AUDIO_AT + audioLen + 5;
+const total = AUDIO_AT + audioLen + 3.5;
 
 const url = new URL(pathToFileURL(resolve('scene.html')));
 url.search = new URLSearchParams({ audioAt: AUDIO_AT, audioLen, script: readFileSync('recap.txt', 'utf8').trim() }).toString();
